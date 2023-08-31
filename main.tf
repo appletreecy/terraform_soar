@@ -539,7 +539,7 @@ resource "aws_lb" "soar-lb" {
   }
 }
 
-#Configure the target group
+#Configure the target group for port 443
 resource "aws_lb_target_group" "https_service" {
   name     = "target-group-for-https-service"
   port     = 443
@@ -559,8 +559,29 @@ resource "aws_lb_target_group" "https_service" {
     protocol = "HTTPS"
   }
 }
-# attach the EC2 instance to the target group
 
+#Configure the target group for port 9999
+resource "aws_lb_target_group" "https_service_9999" {
+  name     = "target-group-for-https-9999"
+  port     = 9999
+  protocol = "HTTPS"
+  vpc_id   = aws_vpc.prod-vpc.id
+
+
+
+  stickiness {
+    type            = "lb_cookie"
+    cookie_duration = 604800 # Session duration in seconds
+  }
+
+  health_check {
+    path     = "/check" # Replace with the health check path for your application
+    port     = 9999     # Port to perform health checks on
+    protocol = "HTTPS"
+  }
+}
+
+# attach the EC2 instance to the target group
 resource "aws_lb_target_group_attachment" "attchment-1" {
   target_group_arn = aws_lb_target_group.https_service.arn
   target_id        = aws_instance.soar-server-instance-1.id
