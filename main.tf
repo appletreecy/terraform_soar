@@ -167,10 +167,10 @@ output "server_public_ip" {
 
 resource "aws_instance" "web-server-instance" {
   ami               = "ami-0b18e0c38e02712f1"
-  instance_type     = "m5.xlarge"
+  instance_type     = "t2.medium"
   availability_zone = "us-east-1a"
   key_name          = "2023-0804"
-  depends_on        = [aws_eip.one]
+  depends_on        = [aws_eip.one, aws_db_instance.default]
 
   network_interface {
     device_index         = 0
@@ -194,6 +194,16 @@ resource "aws_instance" "web-server-instance" {
       "chmod 600 /home/phantom/.ssh/2023-0804.pem",
       "sudo yum -y install epel-release",
       "sudo yum -y install ansible",
+      "git clone https://github.com/appletreecy/ansible_soar_cluster.git",
+      "export MY_VAR=${local.rds_db_address}",
+      "export MY_LBDNS=${local.lb_dns_address}",
+      "echo export MY_VAR=$MY_VAR >> /home/phantom/.bash_profile",
+      "echo export MY_LBDNS=$MY_VAR >> /home/phantom/.bash_profile",
+      "echo ${local.rds_db_address} > /home/phantom/1.conf",
+      "echo ${local.lb_dns_address} > /home/phantom/2.conf",
+      "sh /home/phantom/ansible_soar_cluster/scao_known_hosts.sh",
+      "/usr/bin/ansible-playbook -i /home/phantom/ansible_soar_cluster/inventory.ini /home/phantom/ansible_soar_cluster/site.yml",
+      "/usr/bin/ansible-playbook -i /home/phantom/ansible_soar_cluster/inventory.ini /home/phantom/ansible_soar_cluster/post_conf.yml"
     ]
     connection {
       type        = "ssh"
@@ -203,6 +213,16 @@ resource "aws_instance" "web-server-instance" {
     }
 
   }
+
+  # provisioner "local-exec" {
+  #   command     = "ansible-playbook -i inventory.ini site.yml"
+  #   working_dir = "/home/phantom/ansible_soar_cluster"
+  # }
+
+  # provisioner "local-exec" {
+  #   command     = "ansible-playbook -i inventory.ini post_conf.yml"
+  #   working_dir = "/home/phantom/ansible_soar_cluster"
+  # }
 
   tags = {
     Name = "soar-server"
@@ -244,7 +264,7 @@ output "server_public_ip-1" {
 
 resource "aws_instance" "soar-server-instance-1" {
   ami               = "ami-0b18e0c38e02712f1"
-  instance_type     = "m5.xlarge"
+  instance_type     = "t2.medium"
   availability_zone = "us-east-1a"
   key_name          = "2023-0804"
   depends_on        = [aws_eip.one-1]
@@ -319,7 +339,7 @@ output "server_public_ip-2" {
 
 resource "aws_instance" "soar-server-instance-2" {
   ami               = "ami-0b18e0c38e02712f1"
-  instance_type     = "m5.xlarge"
+  instance_type     = "t2.medium"
   availability_zone = "us-east-1a"
   key_name          = "2023-0804"
   depends_on        = [aws_eip.one-2]
@@ -385,7 +405,7 @@ output "server_public_ip-3" {
 
 resource "aws_instance" "soar-server-instance-3" {
   ami               = "ami-0b18e0c38e02712f1"
-  instance_type     = "m5.xlarge"
+  instance_type     = "t2.medium"
   availability_zone = "us-east-1a"
   key_name          = "2023-0804"
   depends_on        = [aws_eip.one-3]
@@ -460,7 +480,7 @@ output "server_public_ip-4" {
 
 resource "aws_instance" "soar-server-instance-4" {
   ami               = "ami-0b18e0c38e02712f1"
-  instance_type     = "m5.xlarge"
+  instance_type     = "t2.medium"
   availability_zone = "us-east-1a"
   key_name          = "2023-0804"
   depends_on        = [aws_eip.one-4]
@@ -600,6 +620,25 @@ resource "aws_lb_target_group_attachment" "attchment-3" {
   port             = 443
 }
 
+# attach the EC2 instance to the target group for https port 9999
+resource "aws_lb_target_group_attachment" "attchment-1-9999" {
+  target_group_arn = aws_lb_target_group.https_service.arn
+  target_id        = aws_instance.soar-server-instance-1.id
+  port             = 9999
+}
+
+resource "aws_lb_target_group_attachment" "attchment-2-9999" {
+  target_group_arn = aws_lb_target_group.https_service.arn
+  target_id        = aws_instance.soar-server-instance-2.id
+  port             = 9999
+}
+
+resource "aws_lb_target_group_attachment" "attchment-3-9999" {
+  target_group_arn = aws_lb_target_group.https_service.arn
+  target_id        = aws_instance.soar-server-instance-3.id
+  port             = 9999
+}
+
 #configure lb listener
 resource "aws_lb_listener" "front_end_listener" {
   load_balancer_arn = aws_lb.soar-lb.arn
@@ -615,14 +654,29 @@ resource "aws_lb_listener" "front_end_listener" {
   }
 }
 
+#configure lb listener for https port 9999
+resource "aws_lb_listener" "front_end_listener_9999" {
+  load_balancer_arn = aws_lb.soar-lb.arn
+  port              = "9999"
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = "arn:aws:acm:us-east-1:768298382555:certificate/cee27c32-022a-4c16-9715-92baab8bbf8a"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.https_service.arn
+
+  }
+}
+
 # add one listener rule to the elb
 resource "aws_lb_listener_rule" "static-path" {
-  listener_arn = aws_lb_listener.front_end_listener.arn
+  listener_arn = aws_lb_listener.front_end_listener_9999.arn
   priority     = 100
 
   action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.https_service.arn
+    target_group_arn = aws_lb_target_group.https_service_9999.arn
 
   }
   condition {
@@ -630,6 +684,8 @@ resource "aws_lb_listener_rule" "static-path" {
       values = ["/websocket"]
     }
   }
+
+
 }
 
 #create the EFS File System
@@ -663,7 +719,7 @@ resource "aws_db_instance" "default" {
   db_name               = "phantom"
   engine                = "postgres"
   engine_version        = "11"
-  instance_class        = "db.t2.large"
+  instance_class        = "db.t2.medium"
   username              = "postgres"
   password              = "splunk3du"
   parameter_group_name  = "default.postgres11"
@@ -678,4 +734,17 @@ resource "aws_db_instance" "default" {
 
 output "rds_db_address" {
   value = aws_db_instance.default.address
+}
+
+output "lb_dns_address" {
+  value = aws_lb.soar-lb.dns_name
+}
+
+output "lb_dns_address_url" {
+  value = "https://${aws_lb.soar-lb.dns_name}:443"
+}
+
+locals {
+  rds_db_address = aws_db_instance.default.address
+  lb_dns_address = aws_lb.soar-lb.dns_name
 }
